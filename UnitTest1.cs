@@ -1,12 +1,12 @@
+using CsvHelper;
+using CsvHelper.Configuration.Attributes;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using CsvHelper;
-using CsvHelper.Configuration.Attributes;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 using Xunit;
 
 namespace csharp_assessment
@@ -34,7 +34,15 @@ namespace csharp_assessment
 
         public static double? LookupPromotionDiscount(string region, DateTime date)
         {
-            throw new NotImplementedException();
+            double? promotionDiscount = null;
+            using (var reader = new StreamReader(ResourceHelper.GetResource("Promotion.csv")))
+            using (var csv = new CsvReader(reader, CultureInfo.InvariantCulture))
+            {
+                var records = csv.GetRecords<PromotionRecord>();
+                var promotion = records.FirstOrDefault(c => c.Promotion.ToLowerInvariant().Contains(region.ToLowerInvariant()) && c.StartDate <= date && date <= c.EndDate);
+                promotionDiscount = promotion == null ? null as double? : Convert.ToDouble(promotion.Discount);
+            }
+            return promotionDiscount;
         }
 
         [Theory]
@@ -65,7 +73,7 @@ namespace csharp_assessment
             using (var reader = new StreamReader(ResourceHelper.GetResource("Promotion.csv")))
             using (var csv = new CsvReader(reader, CultureInfo.InvariantCulture))
             {
-                Assert.Equal(3.51m, csv.GetRecords<PromotionRecord>().Aggregate(0.0m, (acc, p) => acc /* TODO: Fill in correct function here*/));
+                Assert.Equal(3.51m, csv.GetRecords<PromotionRecord>().Aggregate(0.0m, (acc, p) => acc + p.Discount));
             }
         }
     }
@@ -98,20 +106,45 @@ namespace csharp_assessment
 
         public static Position GetPosition(JObject config)
         {
-            // TODO: Extract layouts/position object from json
-            throw new NotImplementedException();
+            if (config?["layouts"] is JArray layoutArray)
+            {
+                if (layoutArray.Any() && layoutArray[0]?["position"] is JObject positionObject)
+                {
+                    var position = positionObject.ToObject<Position>();
+                    return position;
+                }
+            }
+            return null;
         }
 
         public static string GetTitle(JObject config)
         {
-            // TODO Extract title text underneath vcObjects
-            throw new NotImplementedException();
+            if (config?["singleVisual"]?["vcObjects"] is JObject vcObjects)
+            {
+                if (vcObjects["title"] is JArray title)
+                {
+                    if (title.Any())
+                    {
+                        var titleString = (string)title[0]?["properties"]?["text"]?["expr"]?["Literal"]?["Value"];
+                        if (!string.IsNullOrEmpty(titleString))
+                        {
+                            var data = titleString[1..^1];
+                            return data;
+                        }
+                    }
+                }
+            }
+            return string.Empty;
         }
 
         public static string[] GetObjectNames(JObject config)
         {
-            // TODO Extract names of singleVisual/objects
-            throw new NotImplementedException();
+            if (config?["singleVisual"]?["objects"] is JObject objects)
+            {
+                var keys = objects.Properties().Select(c => c.Name).ToArray();
+                return keys;
+            }
+            return Array.Empty<string>();
         }
 
         [Theory]
@@ -140,8 +173,8 @@ namespace csharp_assessment
 
         public static IEnumerable<object[]> ExpectedObjectNames()
         {
-            yield return new object[] { "1", new[] {"icon","outline","fill","text"}};
-            yield return new object[] { "2", new[] {"icon","fill"}};
+            yield return new object[] { "1", new[] { "icon", "outline", "fill", "text" } };
+            yield return new object[] { "2", new[] { "icon", "fill" } };
         }
 
         [Theory]
@@ -151,13 +184,10 @@ namespace csharp_assessment
             var names = GetObjectNames(visualConfigs[id]);
             Assert.Equal(expectedNames, names);
         }
-
-
     }
 
     public static class ResourceHelper
     {
-        public static Stream GetResource(string name) =>
-            typeof(ResourceHelper).Assembly.GetManifestResourceStream(typeof(ResourceHelper), name);
+        public static Stream GetResource(string name) => typeof(ResourceHelper).Assembly.GetManifestResourceStream(typeof(ResourceHelper), name);
     }
 }
